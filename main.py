@@ -98,7 +98,7 @@ def main():
         session.close()  # Close session  
     
     # Don't forget to print the following string after you import all the necessary data:
-    print(f"ZYLYTY Data Import Completed [{totalAccounts}, {totalClients}, {totalTransactions}]")
+    print(f"ZYLYTY Data Import Completed [{totalClients}, {totalAccounts}, {totalTransactions}]")
 
 #import accounts data from API
 def etl_import_accounts():
