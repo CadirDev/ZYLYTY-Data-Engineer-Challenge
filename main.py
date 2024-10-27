@@ -4,26 +4,17 @@ from dotenv import load_dotenv
 import requests
 import pandas as pd
 import io
-import time
-from sqlalchemy import create_engine, Numeric, String, BigInteger, Date, DateTime, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, Column, Numeric, String, BigInteger, Date, DateTime, ForeignKey, text
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.ext.declarative import declarative_base
+from concurrent.futures import ThreadPoolExecutor
 import psycopg2
+import time
 
-# Note: Do not rename this file, it must be the entry point of your application.
-
-# load .env file to environment
+# Load .env file to environment
 load_dotenv()
 
-# Note 2: You must read from the follpuowing environment variables:
-# ADMIN_API_KEY -> "The secret API key used to call the API endpoints (the Bearer token)"
-# DB_HOST -> "The hostname of the database"
-# DB_PORT -> "The port of the database"
-# DB_USERNAME -> "The username of the database"
-# DB_PASSWORD -> "The password of the database"
-# DB_NAME -> "The name of the database"
-# API_BASE_URL -> "The base URL of the API your project will connect to"
-
-# Example:
+# Environment variables
 ADMIN_API_KEY = os.getenv('ADMIN_API_KEY')
 DB_HOST = os.getenv('DB_HOST')
 DB_PORT = os.getenv('DB_PORT')
@@ -34,117 +25,127 @@ API_BASE_URL = os.getenv('API_BASE_URL')
 
 # Token Bearer - API Key
 headers = {
-        "Authorization": f"Bearer {ADMIN_API_KEY}"
-    }
+    "Authorization": f"Bearer {ADMIN_API_KEY}"
+}
 
 # Database Engine
-db_engine = create_engine(f'postgresql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
+db_engine = create_engine(f'postgresql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}', pool_size=10, max_overflow=20)
 Session = sessionmaker(bind=db_engine)
 
-# Use a session to execute command
-session = Session()
+# Define base for models
+Base = declarative_base()
 
-print(render('Hello ZYLYTY!', colors=['cyan', 'magenta'], align='center', font='3d'))
-print(f"Admin API Key: {ADMIN_API_KEY}")
-print(f"Database Host: {DB_HOST}")
-print(f"Database Port: {DB_PORT}")
-print(f"Database Username: {DB_USERNAME}")
-print(f"Database Password: {DB_PASSWORD}")
-print(f"Database Name: {DB_NAME}")
-print(f"API Base URL: {API_BASE_URL}")
+# Class Definitions
+class Account(Base):
+    __tablename__ = 'accounts'
+    account_id = Column(BigInteger, primary_key=True)
+    client_id = Column(String(50), ForeignKey('clients.client_id'), nullable=False)
+    
+    client = relationship("Client", back_populates="accounts")
 
-# Example main, modify at will
-def main():
-    # You can import the data here from API_BASE_URL, using the ADMIN_API_KEY!
-    # (...)
+class Client(Base):
+    __tablename__ = 'clients'
+    client_id = Column(String(50), primary_key=True)
+    client_name = Column(String(50), nullable=False)
+    client_email = Column(String(40), nullable=False)
+    client_birth_date = Column(Date)
     
-    totalAccounts = 0
-    totalClients = 0
-    totalTransactions = 0
+    accounts = relationship("Account", back_populates="client")
+
+class Transaction(Base):
+    __tablename__ = 'transactions'
+    transaction_id = Column(BigInteger, primary_key=True)
+    timestamp = Column(DateTime, nullable=False)
+    account_id = Column(BigInteger, ForeignKey('accounts.account_id'), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    type = Column(String(5), nullable=False)
+    medium = Column(String(10), nullable=False)
+
+# Main function
+def main() -> None:
+    print(render('Hello ZYLYTY!', colors=['cyan', 'magenta'], align='center', font='3d'))
     
-    #Get accounts data from ETL
-    accountsData = etl_import_accounts()
-    #Get clients data from ETL
-    clientsData = etl_import_clients()
-    #Get transacitons data from ETL
-    transactionsData = etl_import_transactions()
+    print(render('Hello ZYLYTY!', colors=['cyan', 'magenta'], align='center', font='3d'))
+    print(f"Admin API Key: {ADMIN_API_KEY}")
+    print(f"Database Host: {DB_HOST}")
+    print(f"Database Port: {DB_PORT}")
+    print(f"Database Username: {DB_USERNAME}")
+    print(f"Database Password: {DB_PASSWORD}")
+    print(f"Database Name: {DB_NAME}")
+    print(f"API Base URL: {API_BASE_URL}")
+
     
-    #clean transactions data
-    transactionsData = clean_Transactions_Data(transactionsData)
-    
-    # Total Accounts
+    # Create tables if they don't exist
+    Base.metadata.create_all(db_engine)  
+
+    # Import data using parallel processing
+    with ThreadPoolExecutor() as executor:
+        accountsFuture = executor.submit(etl_import_accounts)
+        clientsFuture = executor.submit(etl_import_clients)
+        transactionsFuture = executor.submit(etl_import_transactions)
+
+        accountsData = accountsFuture.result()
+        clientsData = clientsFuture.result()
+        transactionsData = transactionsFuture.result()
+
+    # Clean transactions data
+    transactionsData = clean_transactions_data(transactionsData)
+
     totalAccounts = len(accountsData)
-    # Total Clients
     totalClients = len(clientsData)
-    # Total Transactions
     totalTransactions = len(transactionsData)
-    
-    
-    # Insert Account Data imported to SQL tables
-    insert_Account_Data_to_Table(accountsData)
-    # Insert Client Data imported to SQL tables
-    insert_Client_Data_to_Table(clientsData)
-    # Insert Transaction Data imported to SQL tables
-    insert_Transaction_Data_to_Table(transactionsData)
-    
-    
-    try:
-        #Create view client_transaction_counts
-        create_View_Client_Transaction_Counts()
-        #Create view monthly_transaction_summary 
-        create_View_Monthly_Transaction_Summary()
-        #Create view high_transaction_accounts  
-        create_View_High_Transaction_Accounts()
-        print("View criada com sucesso!")
-    except Exception as e:
-        print(f"Error occured: {e}")
-    finally:
-        session.close()  # Close session  
-    
-    # Don't forget to print the following string after you import all the necessary data:
+
+    # Insert data into SQL tables
+    with Session() as session:
+        try:
+            # Insert clients first
+            print("Inserting clients...")
+            insert_data_to_table(session, Client, clientsData)
+            
+            # Validate accounts before inserting
+            valid_client_ids = set(clientsData['client_id'].unique())
+            invalid_accounts = accountsData[~accountsData['client_id'].isin(valid_client_ids)]
+
+            if not invalid_accounts.empty:
+                print("Invalid accounts found:")
+                print(invalid_accounts)
+            else:
+                #print("Inserting accounts...")
+                insert_data_to_table(session, Account, accountsData)
+            
+            #print("Inserting transactions...")
+            insert_data_to_table(session, Transaction, transactionsData)
+
+            create_view_client_transaction_counts(session)
+            create_view_monthly_transaction_summary(session)
+            create_view_high_transaction_accounts(session)
+            #print("Views created successfully!")
+        except Exception as e:
+            print(f"Error occurred: {e}")
+
+    # Print summary after data import
     print(f"ZYLYTY Data Import Completed [{totalClients}, {totalAccounts}, {totalTransactions}]")
 
-#import accounts data from API
-def etl_import_accounts():
-    # Accounts Endpoint
+# ETL Functions
+def etl_import_accounts() -> pd.DataFrame:
     accountsURL = "download/accounts.csv"
-    
-    payloadAccount = {}
-
-    #Accounts.csv
-    accountsResponse = requests.request("GET", f"{API_BASE_URL}/{accountsURL}", headers=headers, data=payloadAccount).content
-
-    #Convert Accounts Data to Pandas DataFrame
+    accountsResponse = requests.get(f"{API_BASE_URL}/{accountsURL}", headers=headers).content
     accountsData = pd.read_csv(io.StringIO(accountsResponse.decode('utf-8')))
-    
     return accountsData
 
-def etl_import_clients():
-    # Clients Endpoint
+def etl_import_clients() -> pd.DataFrame:
     clientsURL = "download/clients.csv"
-    
-    payloadClients = {}
-    
-    #Clients.csv
-    clientsResponse = requests.request("GET", f"{API_BASE_URL}/{clientsURL}", headers=headers, data=payloadClients).content
-    
-    #Convert Clients Data to Pandas DataFrame
+    clientsResponse = requests.get(f"{API_BASE_URL}/{clientsURL}", headers=headers).content
     clientsData = pd.read_csv(io.StringIO(clientsResponse.decode('utf-8')))
-    
     return clientsData
 
-def etl_import_transactions():
-    # Transactions Endpoint
+def etl_import_transactions() -> pd.DataFrame:
     transactionsURL = "transactions"
-    
-    #Get Transactions Data in Pandas DataFrame
-    transactionsData = get_Transactions_Paginated(f"{API_BASE_URL}/{transactionsURL}",headers)
-    
+    transactionsData = get_transactions_paginated(f"{API_BASE_URL}/{transactionsURL}", headers)
     return transactionsData
 
-   
 # get transactions paginated
-def get_Transactions_Paginated (url, headers):
+def get_transactions_paginated (url, headers):
 
     # Parameters for pagination
     page = 0
@@ -205,116 +206,58 @@ def get_Transactions_Paginated (url, headers):
             break
     
     return all_data  
-
-
- # Cleaning Data
-def clean_Transactions_Data(all_data):
-   
+def clean_transactions_data(all_data: pd.DataFrame) -> pd.DataFrame:
     if not all_data.empty:
-
-        # Remove duplicate transaction_id
-        all_data = all_data.drop_duplicates(subset=['timestamp','account_id'])
-        
-        # Convert non numeric values to zero
+        all_data = all_data.drop_duplicates(subset=['timestamp', 'account_id'])
         all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce').fillna(0)
-    
     return all_data
 
-# Insert Account Data imported to SQL tables
-def insert_Account_Data_to_Table(accountsData):
-    # Table data type mapping
-    dtype_mapping = {
-    'account_id': BigInteger,
-    'client_id': String(50)
-    }
-    
-    # Insert accounts data to accounts SQL Table
-    accountsData.to_sql('accounts', db_engine, if_exists='replace', index=False, dtype=dtype_mapping)
+# Insert data to SQL tables
+def insert_data_to_table(session, model_class, data: pd.DataFrame) -> None:
+    instances = [model_class(**record) for record in data.to_dict(orient='records')]
+    session.bulk_save_objects(instances)
+    session.commit()
 
-# Insert Client Data imported to SQL tables
-def insert_Client_Data_to_Table(clientsData): 
-    # Table data type mapping
-    dtype_mapping = {
-    'client_id': String(50),
-    'client_name': String(50),
-    'client_email': String(40),
-    'client_birth_date': Date
-    }
-    
-    # Insert accounts data to clients SQL Table
-    clientsData.to_sql('clients', db_engine, if_exists='replace', index=False, dtype=dtype_mapping)
-    
-# Insert Transaction Data imported to SQL tables
-def insert_Transaction_Data_to_Table(transactionsData):
-    # Table data type mapping
-    dtype_mapping = {
-    'transaction_id': BigInteger,
-    'timestamp': DateTime,
-    'account_id': BigInteger,
-    'amount': Numeric(10,2),
-    'type': String(5),
-    'medium': String(10)
-    }
-    # Insert accounts data to transactions SQL Table
-    transactionsData.to_sql('transactions', db_engine, if_exists='replace', index=False, dtype=dtype_mapping)
-
-#Create view called client_transaction_counts
-def create_View_Client_Transaction_Counts():
-    
-    # SQL Command to Create View
+# Create views
+def create_view_client_transaction_counts(session) -> None:
     create_view_query = '''
-            CREATE OR REPLACE VIEW client_transaction_counts AS
-            SELECT c.client_id, count(transaction_id) as transaction_count
-            FROM clients as c
-            inner  join accounts as a on c.client_id=a.client_id
-            inner  join transactions as tr on a.account_id=tr.account_id
-            group by c.client_id
-            order by c.client_id
-            ;
-        '''
-  
-    session.execute(text(create_view_query))  
-    session.commit()  # Commit transaction    
+        CREATE OR REPLACE VIEW client_transaction_counts AS
+        SELECT c.client_id, COUNT(tr.transaction_id) AS transaction_count
+        FROM clients c
+        JOIN accounts a ON c.client_id = a.client_id
+        JOIN transactions tr ON a.account_id = tr.account_id
+        GROUP BY c.client_id
+        ORDER BY c.client_id;
+    '''
+    session.execute(text(create_view_query))
+    session.commit()
 
-
-#Create view called monthly_transaction_summary 
-def create_View_Monthly_Transaction_Summary():
-    
-    # SQL Command to Create View
+def create_view_monthly_transaction_summary(session) -> None:
     create_view_query = '''
-            CREATE OR REPLACE VIEW monthly_transaction_summary AS
-            SELECT to_char(date_trunc('month', timestamp), 'YYYY-MM-01') as month, client_email,
-            count(transaction_id) as transaction_count, sum(amount) as total_amount
-            from transactions as tr
-            inner  join accounts as a on tr.account_id=a.account_id
-            inner  join clients as c on c.client_id=a.client_id
-            group by to_char(date_trunc('month', timestamp), 'YYYY-MM-01'), client_email
-            order by month, client_email
-            ;
-        '''
-    
-    session.execute(text(create_view_query))  
-    session.commit()  # Commit transaction
-  
+        CREATE OR REPLACE VIEW monthly_transaction_summary AS
+        SELECT to_char(date_trunc('month', timestamp), 'YYYY-MM-01') AS month, client_email,
+        COUNT(transaction_id) AS transaction_count, SUM(amount) AS total_amount
+        FROM transactions tr
+        JOIN accounts a ON tr.account_id = a.account_id
+        JOIN clients c ON c.client_id = a.client_id
+        GROUP BY to_char(date_trunc('month', timestamp), 'YYYY-MM-01'), client_email
+        ORDER BY month, client_email;
+    '''
+    session.execute(text(create_view_query))
+    session.commit()
 
-#Create view called high_transaction_accounts  
-def create_View_High_Transaction_Accounts():
-    
-    # SQL Command to Create View
+def create_view_high_transaction_accounts(session) -> None:
     create_view_query = '''
-            CREATE OR REPLACE VIEW high_transaction_accounts AS
-           SELECT to_char(date_trunc('month', timestamp), 'YYYY-MM-DD') as date, account_id,
-            count(transaction_id) as transaction_count
-            from transactions as tr
-            group by to_char(date_trunc('month', timestamp), 'YYYY-MM-DD'), account_id
-            having count(transaction_id) > 2
-            order by date, account_id
-            ;
-        '''
-
-    session.execute(text(create_view_query))  
-    session.commit()  # Commit transaction
-       
+        CREATE OR REPLACE VIEW high_transaction_accounts AS
+        SELECT to_char(date_trunc('month', timestamp), 'YYYY-MM-DD') AS date, account_id,
+        COUNT(transaction_id) AS transaction_count
+        FROM transactions tr
+        GROUP BY to_char(date_trunc('month', timestamp), 'YYYY-MM-DD'), account_id
+        HAVING COUNT(transaction_id) > 2
+        ORDER BY date, account_id;
+    '''
+    session.execute(text(create_view_query))
+    session.commit()
 
 if __name__ == "__main__":
     main()
