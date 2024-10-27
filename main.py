@@ -76,6 +76,9 @@ def main():
     # Total Transactions
     totalTransactions = len(transactionsData)
     
+    #clean transactions data
+    transactionsData = clean_Transactions_Data(transactionsData)
+    
     # Insert Account Data imported to SQL tables
     insert_Account_Data_to_Table(accountsData)
     # Insert Client Data imported to SQL tables
@@ -200,7 +203,10 @@ def get_Transactions_Paginated (url, headers):
             #print(f"Falha ao carregar a página {page} após {max_retries} tentativas.")
             break
     
-    
+    return all_data   
+
+
+def clean_Transactions_Data(all_data):
     # Cleaning Data
     if not all_data.empty:
 
@@ -213,7 +219,7 @@ def get_Transactions_Paginated (url, headers):
         all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce')  # Convert to numeric, where is invalid set NaN
         all_data = all_data.dropna(subset=['amount'])  # Remove Remove NaN Rows
     
-    return all_data   
+    return all_data
 
 # Insert Account Data imported to SQL tables
 def insert_Account_Data_to_Table(accountsData):
