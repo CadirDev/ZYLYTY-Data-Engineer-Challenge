@@ -225,7 +225,7 @@ def insert_Account_Data_to_Table(accountsData):
     # Table data type mapping
     dtype_mapping = {
     'account_id': BigInteger,
-    'client_id': String(50)
+    'client_id': String(255)
     }
     
     # Insert accounts data to accounts SQL Table
@@ -235,9 +235,9 @@ def insert_Account_Data_to_Table(accountsData):
 def insert_Client_Data_to_Table(clientsData): 
     # Table data type mapping
     dtype_mapping = {
-    'client_id': String(50),
-    'client_name': String(50),
-    'client_email': String(40),
+    'client_id': String(255),
+    'client_name': String(255),
+    'client_email': String(255),
     'client_birth_date': Date
     }
     
@@ -251,9 +251,9 @@ def insert_Transaction_Data_to_Table(transactionsData):
     'transaction_id': BigInteger,
     'timestamp': DateTime,
     'account_id': BigInteger,
-    'amount': Numeric(10,2),
-    'type': String(5),
-    'medium': String(10)
+    'amount': Numeric(17,2),
+    'type': String(255),
+    'medium': String(255)
     }
     # Insert accounts data to transactions SQL Table
     transactionsData.to_sql('transactions', db_engine, if_exists='replace', index=False, dtype=dtype_mapping)
