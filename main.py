@@ -69,6 +69,9 @@ def main():
     #Get transacitons data from ETL
     transactionsData = etl_import_transactions()
     
+    #clean transactions data
+    transactionsData = clean_Transactions_Data(transactionsData)
+    
     # Total Accounts
     totalAccounts = len(accountsData)
     # Total Clients
@@ -76,8 +79,6 @@ def main():
     # Total Transactions
     totalTransactions = len(transactionsData)
     
-    #clean transactions data
-    transactionsData = clean_Transactions_Data(transactionsData)
     
     # Insert Account Data imported to SQL tables
     insert_Account_Data_to_Table(accountsData)
@@ -94,7 +95,7 @@ def main():
         create_View_Monthly_Transaction_Summary()
         #Create view high_transaction_accounts  
         create_View_High_Transaction_Accounts()
-         #print("View criada com sucesso!")
+        # print("View criada com sucesso!")
     except Exception as e:
         print(f"Error occured: {e}")
     finally:
@@ -213,11 +214,13 @@ def clean_Transactions_Data(all_data):
         # Remove invalid transaction_id "N/A"
         all_data = all_data.dropna(subset=['transaction_id'])
         # Remove duplicate transaction_id
-        all_data = all_data.drop_duplicates(subset='transaction_id')
+        all_data = all_data.drop_duplicates(subset=['transaction_id','account_id'])
         
-        # Romove where 'amount' is not numeric
-        all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce')  # Convert to numeric, where is invalid set NaN
-        all_data = all_data.dropna(subset=['amount'])  # Remove Remove NaN Rows
+        # Change non numeric amount to 0
+        #all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce')  # Convert to numeric, where is invalid set NaN
+        #all_data = all_data.dropna(subset=['amount'])  # Remove Remove NaN Rows
+        # Converte valores não numéricos para NaN e substitui NaN por 0
+        all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce').fillna(0)
     
     return all_data
 
