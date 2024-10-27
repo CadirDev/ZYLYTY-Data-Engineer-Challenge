@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, Column, Numeric, String, BigInteger, Date,
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.ext.declarative import declarative_base
 from concurrent.futures import ThreadPoolExecutor
+from sqlalchemy.exc import IntegrityError
 import psycopg2
 import time
 
@@ -64,17 +65,15 @@ class Transaction(Base):
 # Main function
 def main() -> None:
     print(render('Hello ZYLYTY!', colors=['cyan', 'magenta'], align='center', font='3d'))
-    
-    print(render('Hello ZYLYTY!', colors=['cyan', 'magenta'], align='center', font='3d'))
+
+    # Print environment variables for debugging (avoid printing sensitive information in production)
     print(f"Admin API Key: {ADMIN_API_KEY}")
     print(f"Database Host: {DB_HOST}")
     print(f"Database Port: {DB_PORT}")
     print(f"Database Username: {DB_USERNAME}")
-    print(f"Database Password: {DB_PASSWORD}")
     print(f"Database Name: {DB_NAME}")
     print(f"API Base URL: {API_BASE_URL}")
 
-    
     # Create tables if they don't exist
     Base.metadata.create_all(db_engine)  
 
@@ -99,7 +98,7 @@ def main() -> None:
     with Session() as session:
         try:
             # Insert clients first
-            print("Inserting clients...")
+            #print("Inserting clients...")
             insert_data_to_table(session, Client, clientsData)
             
             # Validate accounts before inserting
@@ -113,7 +112,7 @@ def main() -> None:
                 #print("Inserting accounts...")
                 insert_data_to_table(session, Account, accountsData)
             
-            #print("Inserting transactions...")
+           #print("Inserting transactions...")
             insert_data_to_table(session, Transaction, transactionsData)
 
             create_view_client_transaction_counts(session)
@@ -137,6 +136,9 @@ def etl_import_clients() -> pd.DataFrame:
     clientsURL = "download/clients.csv"
     clientsResponse = requests.get(f"{API_BASE_URL}/{clientsURL}", headers=headers).content
     clientsData = pd.read_csv(io.StringIO(clientsResponse.decode('utf-8')))
+    
+    # Remove duplicates based on client_id
+    clientsData.drop_duplicates(subset=['client_id'], inplace=True)
     return clientsData
 
 def etl_import_transactions() -> pd.DataFrame:
@@ -144,79 +146,80 @@ def etl_import_transactions() -> pd.DataFrame:
     transactionsData = get_transactions_paginated(f"{API_BASE_URL}/{transactionsURL}", headers)
     return transactionsData
 
-# get transactions paginated
-def get_transactions_paginated (url, headers):
-
-    # Parameters for pagination
+# Get transactions paginated
+def get_transactions_paginated(url, headers):
     page = 0
-    results_per_page = 1000 # result per page
-    max_pages = 300  # max pages
-    max_retries = 5  # max number of attempts
+    results_per_page = 1000  # Result per page
+    max_pages = 25  # Max pages
+    max_retries = 5  # Max number of attempts
 
-    # Blank DataFrame for storing transactions
     all_data = pd.DataFrame()
 
     while page <= max_pages:
-        # Request attempts
         attempts = 0
         success = False
 
         while attempts < max_retries and not success:
             try:
-                # Get Request with Pagination
                 params = {
                     "page": page,
                     "limit": results_per_page
                 }
                 response = requests.get(url, headers=headers, params=params, timeout=10)
                 
-                # Check if request was successful
                 if response.status_code == 200:
                     data = response.json()
                     
-                    # Check data type and process accordingly structure
                     if isinstance(data, list) and len(data) > 0:
                         page_data = pd.DataFrame(data)
                     elif isinstance(data, dict) and "results" in data and len(data["results"]) > 0:
                         page_data = pd.DataFrame(data["results"])
                     else:
-                        #print("Nenhum dado adicional encontrado.")
-                        break  # Stop looping If no more pages
+                        break  # Stop if no more pages
 
-                    # Adding data in main dataframe
                     all_data = pd.concat([all_data, page_data], ignore_index=True)
-
-                    #print(f"Página {page} carregada com sucesso.")
                     success = True
                     page += 1  # Go to next page
                 
                 else:
-                    #print(f"Erro na requisição: {response.status_code}")
                     attempts += 1
-                    time.sleep(2)  # wait befere trying again
+                    time.sleep(2)  # Wait before trying again
 
             except requests.exceptions.RequestException as e:
-                #print(f"Erro de conexão na página {page}: {e}")
                 attempts += 1
-                time.sleep(2)  # wait befere trying again
+                time.sleep(2)  # Wait before trying again
         
-        # If page fail after max attempts
         if not success:
-            #print(f"Falha ao carregar a página {page} após {max_retries} tentativas.")
             break
     
     return all_data  
+
 def clean_transactions_data(all_data: pd.DataFrame) -> pd.DataFrame:
     if not all_data.empty:
         all_data = all_data.drop_duplicates(subset=['timestamp', 'account_id'])
         all_data['amount'] = pd.to_numeric(all_data['amount'], errors='coerce').fillna(0)
     return all_data
 
-# Insert data to SQL tables
+# Insert data to SQL tables with duplicate check
 def insert_data_to_table(session, model_class, data: pd.DataFrame) -> None:
-    instances = [model_class(**record) for record in data.to_dict(orient='records')]
-    session.bulk_save_objects(instances)
-    session.commit()
+    records = data.to_dict(orient='records')
+    instances = [model_class(**record) for record in records]
+    
+    try:
+        session.bulk_save_objects(instances)
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        print(f"Integrity error occurred: {e}")
+        print("Attempting to insert records individually to avoid duplicates.")
+        
+        for record in records:
+            try:
+                instance = model_class(**record)
+                session.add(instance)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
 
 # Create views
 def create_view_client_transaction_counts(session) -> None:
@@ -259,5 +262,6 @@ def create_view_high_transaction_accounts(session) -> None:
     session.execute(text(create_view_query))
     session.commit()
 
-if __name__ == "__main__":
+# Entry point for the script
+if __name__ == '__main__':
     main()
