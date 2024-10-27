@@ -81,20 +81,20 @@ def main():
     
     
     # Insert Account Data imported to SQL tables
-    #insert_Account_Data_to_Table(accountsData)
+    insert_Account_Data_to_Table(accountsData)
     # Insert Client Data imported to SQL tables
-    #insert_Client_Data_to_Table(clientsData)
+    insert_Client_Data_to_Table(clientsData)
     # Insert Transaction Data imported to SQL tables
-    #insert_Transaction_Data_to_Table(transactionsData)
+    insert_Transaction_Data_to_Table(transactionsData)
     
     
     try:
         #Create view client_transaction_counts
-        #create_View_Client_Transaction_Counts()
+        create_View_Client_Transaction_Counts()
         #Create view monthly_transaction_summary 
-        #create_View_Monthly_Transaction_Summary()
+        create_View_Monthly_Transaction_Summary()
         #Create view high_transaction_accounts  
-        #create_View_High_Transaction_Accounts()
+        create_View_High_Transaction_Accounts()
         print("View criada com sucesso!")
     except Exception as e:
         print(f"Error occured: {e}")
