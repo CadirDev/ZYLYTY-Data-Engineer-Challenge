@@ -14,7 +14,7 @@ import psycopg2
 # load .env file to environment
 load_dotenv()
 
-# Note 2: You must read from the following environment variables:
+# Note 2: You must read from the follpuowing environment variables:
 # ADMIN_API_KEY -> "The secret API key used to call the API endpoints (the Bearer token)"
 # DB_HOST -> "The hostname of the database"
 # DB_PORT -> "The port of the database"
