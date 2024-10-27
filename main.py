@@ -7,6 +7,7 @@ import io
 import time
 from sqlalchemy import create_engine, Numeric, String, BigInteger, Date, DateTime, text
 from sqlalchemy.orm import sessionmaker
+import psycopg2
 
 # Note: Do not rename this file, it must be the entry point of your application.
 
