@@ -143,7 +143,7 @@ def etl_import_transactions():
 def get_Transactions_Paginated (url, headers):
 
     # Parameters for pagination
-    page = 1
+    page = 0
     results_per_page = 1000 # result per page
     max_pages = 300  # max pages
     max_retries = 5  # max number of attempts
