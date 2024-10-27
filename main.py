@@ -97,7 +97,7 @@ def get_transactions_paginated(url, headers, config=None):
     # Default configuration for pagination and retries
     config = config or {
         "results_per_page": 1000,
-        "max_pages": 25,
+        "max_pages": 30,
         "max_retries": 5,
         "timeout": 10,
         "sleep_duration": 1,
